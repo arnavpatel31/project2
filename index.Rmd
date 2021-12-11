@@ -15,18 +15,14 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F,
 tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
-
 class_diag <- function(score, truth, positive, cutoff=.5){
-
   pred <- factor(score>cutoff,levels=c("TRUE","FALSE"))
   truth <- factor(truth==positive, levels=c("TRUE","FALSE"))
-
   tab<-table(truth, pred)
   acc=sum(diag(tab))/sum(tab)
   sens=tab[1,1]/rowSums(tab)[1]
   spec=tab[2,2]/rowSums(tab)[2]
   ppv=tab[1,1]/colSums(tab)[1]
-
 #CALCULATE F1
   f1=2*(sens*ppv)/(sens+ppv)
   
@@ -44,21 +40,47 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 }
 ```
 
+```{bash, eval=F}
+cd ~
+git clone https://github.com/nathanialwoodward/project2.git
+```
+
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Arnav Patel (AP53888)
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+Using the same two data sets set I had in Project 1, I was able to make a similar combined set of data that I named EduElect2. The first data set had 8 variables - region (this includes ENC, East North Central; ESC, East South Central; MA, Mid-Atlantic; MTN, Mountain; NE, New England; PAC, Pacific; SA, South Atlantic; WNC, West North Central; WSC, West South Central), population, average SAT verbal and math scores, percent of high-schoolers who took the SAT, average amount of money spent on public education per student, and the average teacher's salary in the state. Wondering how these states would be correlated to political party, I made my own data set using data from Harvard's already existing databases that contained information on what the political party candidate each state voted on during the 1992 presidential election and how many electoral votes those states each had. These data sets interest me because I wanted to see if there was any correlation between spending on public education state by state and the states political affiliations. In order to create a binomial varibale, I mutated the data set to include a varibale called "Party" where if the Political party of the state was Democratic, then it had a value of 1 while if the Political party of the state was Republican, then it had a value of 0. There are a total of 11 variables with 51 observations for each variable (1 for each state and 1 for Washington DC). There are 5 states in the ENC region, 4 states in the ESC region, 3 states in the MA region, 8 states in the MTN region, 6 states in the NE region, 5 states inn the PAC region, 9 states in the SA region, 7 states in the WNC region, and 4 states from the WSC region.
 
 ```{R}
 library(tidyverse)
 # read your datasets in here, e.g., with read_csv()
+library(tidyverse)
+library(carData)
 
-# if your dataset needs tidying, do so here
+# First Dataset (Education and Related Statistics for the U.S. States in 1992)
+edu <- States
+edu <- edu %>% mutate(state = rownames(.))
+view(edu)
+glimpse(edu)
 
-# any other code here
+# Second Dataset (How many electoral votes and what party was voted for in 1992)
+Election <- read_csv("Election.csv")
+view(Election)
+glimpse(Election)
+
+# your joining code
+edu <- edu %>% rename(state_po = state)
+edu[7, 8] = "CT"
+
+EduElect <- full_join(edu, Election, by = "state_po")
+
+EduElect2 <- EduElect %>% select(-pop) %>% mutate(Party = ifelse(Party_Voted == "Democrat", "1","0")) %>% mutate(SAT_Total = SATM + SATV)
+view(EduElect2)
+glimpse(EduElect2)
+
+EduElect2 %>% group_by(region) %>% summarize(n=n())
 ```
 
 ### Cluster Analysis
@@ -66,73 +88,175 @@ library(tidyverse)
 ```{R}
 library(cluster)
 # clustering code here
+clust_dat <- EduElect2 %>% select(percent, dollars, pay)
+view(clust_dat)
+
+sil_width<-vector() #empty vector to hold mean sil width
+for(i in 2:10){  
+  kms <- kmeans(clust_dat,centers=i) #compute k-means solution for each k
+  sil <- silhouette(kms$cluster,dist(clust_dat)) #get sil widths
+  sil_width[i]<-mean(sil[,3]) #take averages (higher is better)
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+pam1 <- clust_dat %>% pam(k=2) #use the pam function
+pam1
+
+pam1$silinfo$avg.width
+
+pamclust<-clust_dat %>% mutate(cluster=as.factor(pam1$clustering))
+
+library(GGally)
+ggpairs(pamclust, columns=1:4, aes(color=cluster))
 ```
 
-Discussion of clustering here
-    
+For the Cluster Analysis, I used the variables of percent, dollars, and pay because I believe that in order to see how important education spending is in each state, these three numerical variables would be most useful. Using a silhuete width graph, I was able to see that the highest value sil_width was when k = 2 which is why I used a value of k = 2. Looking at the cluster analysis, it is clear that the blue cluster has higher values for percent, dollars, and pay compared to the red cluster meaning the blue cluster has all the states that spend more on education and also have more students taking the SAT. The average silhouette width when there are 2 clusters is ~0.74 which means this is really good as it is close to a value of 1.
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
 # PCA code here
+PCA_dat <- EduElect2 %>% select(percent, dollars, pay)
+
+PCA <- princomp(PCA_dat, cor = T)
+
+summary(PCA, loadings ="T")
+
+
+EduElect2 %>% mutate(PC1=PCA$scores[, 1], PC2=PCA$scores[, 2]) %>% 
+  ggplot(aes(PC1, PC2, color=Party_Voted)) + geom_point() + coord_fixed()
 ```
 
-Discussions of PCA here. 
+Discussions of PCA here.
 
+I ended up with PC 1 and PC 2 because the cumulative proportion of PC 1 was only 0.8280 which is less than 0.85. Looking at the loadings, for PC 1, percent, dollars, and pay are all positive meaning when you have a high PC 1 score, there will also be high percent, dollars, and pay scores and vice versa. For PC 2, percent was positive while dollars and pay were negative meaning when you have a high PC 1 score, there will also be a high percent score but low dollars, and pay scores and vice versa.
 ###  Linear Classifier
 
 ```{R}
 # linear classifier code here
+EduElect2$Party <- as.numeric(EduElect2$Party)
+log_fit <- glm(Party ~ SAT_Total + percent + dollars + pay + Electoral_Votes, data=EduElect2, family = "binomial")
+pred_prob <- predict(log_fit, type = "response")
+class_diag(pred_prob, EduElect2$Party, positive = "1")
 ```
 
 ```{R}
 # cross-validation of linear classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data<-sample_frac(EduElect2)
+folds<-rep(1:k, length.out=nrow(data)) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Party ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-glm(Party ~ SAT_Total + percent + dollars + pay + Electoral_Votes, data=EduElect2, family = "binomial")
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test,type="response")
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean) #average diagnostics across all k folds
 ```
 
 Discussion here
+
+After using a logistic regression, using the numerical variables and the variable of Party (1 for Democrat, 0 for Republican), I calculated a AUC of 0.8064. After using cross validation with 10 folds, the AUC increased very very slightly to 0.81945 which may indicate a low level of overfitting from the logistic regression model.
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
 # non-parametric classifier code here
+knn_fit <- knn3(Party ~ SAT_Total + percent + dollars + pay + Electoral_Votes, data=EduElect2)
+y_hat_knn <- predict(knn_fit,EduElect2)
+y_hat_knn
+class_diag(y_hat_knn[,2], EduElect2$Party, positive = "1")
 ```
 
 ```{R}
 # cross-validation of np classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data<-sample_frac(EduElect2)
+folds<-rep(1:k, length.out=nrow(data)) #create folds
+diags<-NULL
+i=1
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Party ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-knn3(Party ~ SAT_Total + percent + dollars + pay + Electoral_Votes, data=EduElect2)
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test)[,2]
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean) #average diagnostics across all k folds
 ```
 
 Discussion
 
+After using a KNN Model, using the numerical variables and the variable of Party (1 for Democrat, 0 for Republican), I calculated a AUC of 0.782 which shows that the model is pretty well designed. After using cross validation with 10 folds, the AUC decrease slightly to 0.76666 which indicates that the original KNN model did better than the cross validation model meaning the CV might have lowkey overfit. Furthermore, compared to the linear model, because the KNN model had a lower AUC, we assume the linear model was a better fit for the data.
 
 ### Regression/Numeric Prediction
 
 ```{R}
 # regression model code here
+Reg_Fit <- lm(SAT_Total ~ percent + dollars + pay + Party, data = EduElect2)
+Predict <- predict(Reg_Fit)
+mean((EduElect2$SAT_Total-Predict)^2)
 ```
 
 ```{R}
 # cross-validation of regression model here
+set.seed(1234)
+k=5 #choose number of folds
+data<-EduElect2[sample(nrow(EduElect2)),] #randomly order rows
+folds<-cut(seq(1:nrow(EduElect2)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  ## Fit linear regression model to training set
+  fit<-lm(SAT_Total ~ percent + dollars + pay + Party, data = EduElect2)
+  ## Get predictions/y-hats on test set (fold i)
+  yhat<-predict(fit,newdata=test)
+  ## Compute prediction error  (MSE) for fold i
+  diags<-mean((test$SAT_Total-yhat)^2) 
+}
+mean(diags) ## get average MSE across all folds!
 ```
 
 Discussion
+
+After using a linear regression model, I calculated out a MSE of 881.3809 which is extremely high showing that the model did not do a good job. After using a 10 fold cross validation model, I calculated out a MSE of 688.243 which while also not a good MSE, shows that the original linear regression model was overfitting.
 
 ### Python 
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required = F)
+message <- "Hello Professor Woodward"
+cat(c(message, py$message))
 ```
 
 ```{python}
 # python code here
+message="and TA Yiwei."
+print(r.message, message)
+
 ```
 
 Discussion
 
+Using a simple message with reticulate, I was able to put in the text "Hello Professor Woodward" into message in the R chunk and then put in "and TA Yiwei." in the Python chunk. In the R chuck, using cat with message first (the "message" defined in the R chunk) followed by py$messagge (the "message" defined in the Python chunk) prints out the text "Hello Professor Woodward and TA Yiwei." Similarly, in the Python chunk, using print withe r.message (the "message" defined in the R chunk) followed by message (the "message" defined in the Python chunk) prints out the text "Hello Professor Woodward and TA Yiwei."
+
 ### Concluding Remarks
 
-Include concluding remarks here, if any
-
-
-
-
+No conluding remarks!
